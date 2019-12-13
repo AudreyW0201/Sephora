@@ -9,6 +9,6 @@ Link to interactive plot: https://yujie980201.shinyapps.io/price/
 
 ## Composition of Products
 
-The second plot explores how composition of products of a brand could affect brand's ratings. We believe brands which carry higher-rating categories of products could potentially have a higher-than-average ratings. Readers could choose how many brands they want to explore, up to 50, from top or from the bottom of brand's composition of products in a bar chart fashion. 
+The second plot explores how composition of products of a brand could affect brand's ratings. We believe brands which carry higher-rating categories of products could potentially have a higher-than-average ratings. Readers could choose how many brands they want to explore, up to 50, from top or from the bottom of brand's composition of products in a bar chart fashion.
 
 Link to interactive plot: https://yujie980201.shinyapps.io/category/
