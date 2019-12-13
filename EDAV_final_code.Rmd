@@ -1,0 +1,349 @@
+---
+title: "EDAV_final_code"
+author: "Yujie Wang"
+date: "12/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, eval = FALSE,echo=FALSE}
+#First check if Sephora allows us to scrape data
+paths_allowed(paths = "https://www.sephora.com")
+brands = read_html("https://www.sephora.com/brands-list") %>%
+  html_nodes(".css-kxa5od") %>% html_attr("href") #Read all brands and their links first
+append = rep("https://www.sephora.com",times = length(brands))
+brandLink = paste0(append, brands) #Append prefix to each link 
+append = rep("/all", times = length(brands))
+brandLink = paste0(brandLink, append)
+
+cosmetics <- data.frame(matrix(ncol = 8)) #Create a data frame to capture all products
+x <- c("Brands", "Products", "Categories", "Prices", "Ratings", "Reviews", "Loves", "URL") #Create variables
+colnames(cosmetics) <- x
+
+#Go through all the brands first
+for (i in 1:length(brands)) {
+  productlist = read_html(brandLink[i]) %>% html_nodes(".css-ix8km1") %>% html_attr("href")
+  append = rep("https://www.sephora.com", times = length(productlist))
+  productlink = paste0(append, productlist)
+  #Go through every product under each brand
+  if(length(productlist)>0) {
+    for (j in 1:length(productlink)) {
+      productlink[j] = str_replace(productlink[j], " ", "%20")
+      brandname = read_html(productlink[j]) %>% html_nodes(".css-euydo4") %>% html_text()
+      productname = read_html(productlink[j]) %>% html_nodes(".css-a1jw00 .css-0") %>%html_text()
+      broadcategory = read_html(productlink[j]) %>% html_nodes(".css-1ylrown") %>% html_text()
+      categories = broadcategory[1]
+      price = read_html(productlink[j]) %>% html_nodes(".css-14hdny6") %>% html_text()
+      ratings = read_html(productlink[j]) %>% html_nodes(".css-r17a09")%>% html_attr('aria-label')
+      two = read_html(productlink[j]) %>% html_nodes(".css-2rg6q7") %>% html_text()
+      number = two[1]
+      loves = two[2]
+      #Append each product to the data frame
+      newRow <- c(Brands = brandname, Products = productname, Categories = categories, Prices = price, Ratings = ratings, Reviews = number, Loves = loves, URL = productlink[j]) 
+      cosmetics <- rbind(cosmetics, newRow)
+    }
+  }
+}
+```
+
+
+
+```{r, include = FALSE,echo=FALSE}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(plotly)
+library(viridis)
+library(GGally)
+library(rvest)
+library(extracat)
+library(bookdown)
+library(shiny)
+library(robotstxt)
+library(ggthemes)
+cosmetics <- read.csv(file="~/Desktop/data.csv", header=TRUE)
+```
+```{r, eval = FALSE,echo=FALSE}
+#Remove dollar sign from price column
+cosmetics$Prices <- str_remove(cos1$Prices, "\\$")
+#Capture the current price
+for (i in 1:length(cosmetics$Prices)) {
+  change = FALSE
+  j = 0
+  while(change == FALSE) {
+    j = j+1
+    if (j >= nchar(cosmetics$Prices[i])) {
+      change = TRUE
+    }
+    if (substr(cosmetics$Prices[i], j, j) == "(") {
+      change = TRUE
+      cosmetics$Prices[i] = substr(cosmetics$Prices[i], 1, j-1)
+    }
+  }
+}
+#Transform Prices, Ratings, Reviews, and Loves columns to numeric values
+cosmetics$Prices = ifelse(is.na(cosmetics$Prices), 0, as.numeric(cosmetics$Prices))
+cosmetics$Ratings = ifelse(is.na(cosmetics$Ratings), 0, as.numeric(cosmetics$Ratings))
+cosmetics$Reviews = ifelse(is.na(cosmetics$Reviews), 0, as.numeric(cosmetics$Reviews))
+cosmetics$Loves = ifelse(is.na(cosmetics$Loves), 0, as.numeric(cosmetics$Loves))
+```
+
+```{r, include = FALSE,echo=FALSE}
+cosmetics <- read.csv(file="~/Desktop/data.csv", header=TRUE)
+cat_data <- cosmetics %>% group_by(Categories) %>%
+  summarize(avg_rating = mean(Ratings, na.rm = TRUE), avg_review = mean(Reviews, na.rm = TRUE), avg_loves = mean(Loves, na.rm = TRUE),sum_review = sum(Reviews, na.rm=TRUE)) %>% ungroup()
+cat_brand = cosmetics %>% group_by(Brands, Categories) %>%
+  summarize(freq=n())%>%filter() %>%
+  mutate(prop=freq/sum(freq))
+```
+
+```{r, include = FALSE,echo=FALSE}
+sephora <- cosmetics %>% group_by(Brands) %>%
+  mutate(sum_review = sum(Reviews)) %>%
+  mutate(sum_love = sum(Loves)) %>%
+  mutate(avg_rating = sum(Ratings*Reviews)/sum_review) %>% ungroup()
+sephora$Prices = ifelse(is.na(cosmetics$Prices), 0, as.numeric(cosmetics$Prices))
+sephora <- sephora %>% group_by(Brands) %>%
+  mutate(num = n()) %>%
+  mutate(avg_price = sum(Prices)/num) %>% ungroup()
+brand <- sephora[c("Brands", "avg_price", "num", "avg_rating", "sum_review", "sum_love")]
+brand <- brand %>% distinct()
+brand$avg_rating = ifelse(is.na(brand$avg_rating), 0, as.numeric(brand$avg_rating))
+brand <- brand[with(brand, order(-avg_rating)), ]
+brand$avg_price = ifelse(is.na(brand$avg_price), 0, as.numeric(brand$avg_price))
+high_rating_brands = brand["Brands"]
+high_brands = high_rating_brands$Brands
+new_data = cosmetics[cosmetics$Brands %in% high_brands[0:55],]
+brand_num = cosmetics[cosmetics$Brands %in% high_brands[0:55],] %>%
+  group_by(Brands) %>% 
+  summarize(freq = n()) %>% 
+  filter(freq <= 4)
+```
+
+```{r,echo=FALSE,warning=FALSE}
+visna(cosmetics, sort = "r")
+```
+
+```{r, fig.height = 6,echo=FALSE}
+ggplot(brand[1:30,], aes(x = avg_rating, y = fct_reorder(Brands, avg_rating))) +
+  geom_point(color = "red") + 
+  ylab("Top 30 Brands") +
+  xlab("Average Ratings") +
+  ggtitle("Top 30 Rated Brands in Sephora") +
+  theme(text = element_text(size = 13), 
+        plot.title = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 13),
+        axis.text.x = element_text(size = 13),
+        axis.ticks.y = element_blank(),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(size = 0.1, color = "black"),
+        panel.background = element_rect(fill = "transparent", color = "black", size = 0.2), 
+        axis.ticks.x = element_line(size = 0.2))
+```
+
+
+```{r,echo=FALSE}
+ggplot(brand_num, aes(x = reorder(Brands, freq), y = freq)) +
+  geom_col(fill = "#D55E00") + 
+  labs(x = "Brands", y = "Number of Products") +
+  theme(text = element_text(size = 13), 
+        plot.title = element_text(size = 16, face = "bold"),
+        panel.background = element_rect(fill = "transparent",
+        colour = "black", size = 0.2), 
+        panel.grid.major.y = element_blank(), 
+        panel.grid.major.x = element_blank(), 
+        axis.ticks.x = element_blank(), 
+        axis.ticks.y = element_line(size = 0.2)) +
+  ggtitle("Brands with Average Ratings above 4.5 and \nwith Less than 4 Products") +
+  coord_flip()
+```
+
+```{r, warning = FALSE, fig.height = 5,echo=FALSE}
+m <- list(l = 50, r = 50, b = 100, t = 100, pad = 4)
+t <- list(size = 13)
+plot_ly(brand[1:30,], x = ~sum_review, y = ~avg_rating, color = I("#0072B2"), text = ~Brands, hoverinfo = 'text') %>%
+  add_markers() %>% 
+  layout(title="Top 30 Average Rated Brands in Sephora  v.s. \n Total Number of Product Reviews", font = t, margin = m, xaxis = list(title = 'Total Number of Product Reviews'), yaxis = list(title = 'Average Ratings'))
+```
+
+```{r}
+library(shiny)
+library(ggplot2)
+library(dplyr)
+
+ui <- fluidPage(
+  titlePanel("Composition of Products of Sephora Beauty Brands"),
+  sidebarLayout(
+    sidebarPanel( 
+      radioButtons("selection", "Choose top or bottom brands:",
+                   c("Top Rated" = "top" ,
+                     "Bottom Rated" = "bottom")),
+      br(),
+      sliderInput("n",
+                  "Number of Brands:",
+                  value = 10,
+                  min = 1,
+                  max = 50),
+      selectInput("categories", "Categories:", choices = c("Fragrance", "Skincare", "Makeup", "Bath & Body", "Mini size", "Tools & Brushes", "Hair", "Men", "Gifts")),
+      hr()
+    ),
+    
+    mainPanel(
+      tabsetPanel(type = "tabs", tabPanel("Plot", plotOutput("plot"))),
+      p("Here is the percentage bar graph with top/bottom rated brands and specific category that you want to know about. Each bar shows the proportions of each categories for the brand." ),
+      p("For the category you selected, you can see the specific category at the bottom of the bar chart with ascending proportion." )
+    )
+  )
+)
+
+server <- function(input, output) {
+  d <- reactive({
+    dist <- switch(input$selection)
+    dist(input$n)
+  })
+  output$plot <- renderPlot({
+    MyData <- read.csv(file="data.csv", header=TRUE)
+    sephora = MyData
+    sephora$Ratings = ifelse(is.na(sephora$Ratings), 0, as.numeric(sephora$Ratings))
+    sephora$Reviews = ifelse(is.na(sephora$Reviews), 0, as.numeric(sephora$Reviews))
+    sephora <- sephora %>% group_by(Brands) %>%
+      mutate(sum_review = sum(Reviews)) %>%
+      mutate(sum_love = sum(Loves)) %>%
+      mutate(avg_rating = sum(Ratings*Reviews)/sum_review) %>% ungroup()
+    brand <- sephora[c(1,9,10,11)]
+    brand <- brand %>% distinct()
+    num = input$n
+    if (input$selection == "top") {
+      brand <- brand[with(brand, order(-avg_rating)),]
+    } else {
+      brand <- brand[with(brand, order(avg_rating)),]
+    }
+    high_brands = brand["Brands"]$Brands
+    top = MyData[MyData$Brands %in% high_brands[0:num],]
+    top_df = top %>% 
+      group_by(Brands,Categories) %>%
+      summarize(freq=n()) %>% 
+      filter() %>%
+      mutate(prop = freq/sum(freq))
+    top_df <-top_df[order(-top_df$prop),]
+    cat_input = input$categories
+    new_df = top_df %>% group_by(Categories)%>% 
+      mutate(k = ifelse(Categories == cat_input,1+prop,0))
+    
+    ggplot(new_df, aes(fill = Categories, y = prop, x = reorder(Brands, -k))) + 
+      geom_bar(position = "fill", stat = "identity") +
+      scale_fill_brewer(palette="Set2") +
+      xlab("Brands") +
+      ylab(paste0("Composition of Products for"," " ,input$selection," ", num, " Brands")) +
+      theme(panel.background = element_rect(fill = "transparent", colour = "black", size = 0.2),
+            text = element_text(size = 13), 
+            plot.title = element_text(size = 16, face = "bold")) +
+      ggtitle(paste0("Proportion of Categories for"," ",input$selection," ", num, " Brand Ratings")) +
+      coord_flip()
+  })
+}
+shinyApp(ui, server, options = list(height = 550))
+```
+
+
+```{r}
+library(shiny)
+library(ggplot2)
+library(dplyr)
+
+
+ui <- fluidPage(
+  titlePanel("Plot of Average Pricing of Brands and Average Ratings, Total Number of Reviews and Loves"),
+  sidebarLayout(
+    sidebarPanel( 
+      radioButtons("selection", "Choose top or bottom brands:",
+                   c("Top Rated" = "Top" ,
+                     "Bottom Rated" = "Bottom")),
+      br(),
+      sliderInput("n",
+                  "Number of Brands:",
+                  value = 10,
+                  min = 1,
+                  max = 320),
+      br(),
+      radioButtons("sub_select", "Choose Variables::",
+                   c("Average Rating" = "rating" ,
+                     "Total Number of Review" = "review",
+                     "Total Number of Loves" = "love")),
+      hr()),
+    
+    mainPanel(
+      tabsetPanel(type = "tabs", tabPanel("Plot", plotOutput("plot"))),
+      p("Here is an interactive graph which gives an option of plotting average price brands with their average ratings, total number of reviews, or total number of loves. It also gives an option to choose the number of brands you want to observe in either ascending or descending order of average ratings.")
+    )
+  )
+)
+
+server <- function(input, output) {
+  d <- reactive({
+    dist <- switch(input$selection)
+    dist(input$n)
+  })
+  output$plot <- renderPlot({
+    
+    sephora <- read.csv(file="data.csv", header=TRUE)
+    sephora$Ratings = ifelse(is.na(sephora$Ratings), 0, as.numeric(sephora$Ratings))
+    sephora$Reviews = ifelse(is.na(sephora$Reviews), 0, as.numeric(sephora$Reviews))
+    sephora$Prices = ifelse(is.na(sephora$Prices), 0, as.numeric(sephora$Prices))
+    
+    sephora <- sephora %>% group_by(Brands) %>%
+      mutate(sum_review = sum(Reviews)) %>%
+      mutate(sum_love = sum(Loves)) %>%
+      mutate(avg_rating = sum(Ratings*Reviews)/sum_review) %>% ungroup()
+    sephora <- sephora %>% group_by(Brands) %>%
+      mutate(num = n()) %>%
+      mutate(avg_price = sum(Prices)/num) %>% ungroup()
+    
+    brand <- sephora[c(1,9,10,11,12,13)]
+    brand <- brand %>% distinct()
+    brand$avg_rating = ifelse(is.na(brand$avg_rating), 0, as.numeric(brand$avg_rating))
+    brand$avg_price = ifelse(is.na(brand$avg_price), 0, as.numeric(brand$avg_price))
+    
+    num = input$n
+    name = input$selection
+    
+    if (input$selection == "Top") {
+      brand <- brand[with(brand, order(-avg_rating)),]
+    } else {
+      brand <- brand[with(brand, order(avg_rating)),]
+    }
+    
+    if (input$sub_select == "rating") {
+      ggplot(brand[1:num,], aes(avg_rating, avg_price)) + geom_point(color = '#ff000050') +
+        labs(x = "Ratings", y = "Average Prices") +
+        ggtitle(paste0(name, " ", num, " Brand Ratings v.s. Average Prices")) +
+        theme(panel.background = element_rect(fill = "transparent", colour = "black", size = 0.2),
+              text = element_text(size = 13), 
+              plot.title = element_text(size = 16, face = "bold")) +
+              coord_flip()}
+    else if (input$sub_select == "review") {
+      ggplot(brand[1:num,], aes(sum_review/1000, avg_price)) + geom_point(color = '#ff000050') +
+        labs(x = "Total Number of Reviews in Thousands", y = "Average Prices") +
+        ggtitle(paste0(name, " ", num, " Brand Total Number of Reviews v.s. Average Prices")) +
+        theme(panel.background = element_rect(fill = "transparent", colour = "black", size = 0.2),
+              text = element_text(size = 13), 
+              plot.title = element_text(size = 16, face = "bold")) +
+              coord_flip()}
+    else {
+      ggplot(brand[1:num,], aes(sum_love/1000, avg_price)) + geom_point(color = '#ff000050') +
+        labs(x = "Total Number of Loves in Thousands", y = "Average Prices") +
+        ggtitle(paste0(name, " ", num, " Brand Total Number of Loves v.s. Average Prices")) +
+        theme(panel.background = element_rect(fill = "transparent", colour = "black", size = 0.2),
+              text = element_text(size = 13), 
+              plot.title = element_text(size = 16, face = "bold")) +
+              coord_flip()}
+  })
+}
+shinyApp(ui, server, options = list(height = 550))
+```
+
